@@ -1,5 +1,5 @@
-from keras.utils import Sequence, to_categorical
-from keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.utils import Sequence, to_categorical
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from multiprocessing import Pool
 from skimage.io import imread
 from functools import partial
@@ -7,6 +7,7 @@ from itertools import repeat
 import numpy as np
 import os
 import random
+import time
 
 def generate_random_augmentation(p, shape):
     aug = {}
@@ -137,6 +138,7 @@ class BigGenerator(Sequence):
         return int(np.ceil(self._df.shape[0] / float(self._batch_size)))
 
     def __getitem__(self, idx):
+
         batch_paths = self._df.iloc[idx * self._batch_size : (idx + 1) * self._batch_size][self._x_col]
         batch_y = self._df.iloc[idx * self._batch_size : (idx + 1) * self._batch_size][self._y_col]
 
@@ -150,6 +152,7 @@ class BigGenerator(Sequence):
 
         if self._one_hot:
             batch_y = to_categorical(batch_y, num_classes=self._num_classes)
+
 
         return np.array(batch_x), np.array(batch_y)
 

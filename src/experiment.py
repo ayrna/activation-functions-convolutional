@@ -1,13 +1,17 @@
-import keras
+import tensorflow as tf
+from tensorflow import keras
 import numpy as np
 from net_keras import Net
 import os
 import pickle
+import time
 from metrics import np_quadratic_weighted_kappa, top_2_accuracy, top_3_accuracy, \
 	minimum_sensitivity, accuracy_off1
 from dataset2 import Dataset
 from sklearn.metrics import confusion_matrix
-from keras import backend as K
+from tensorflow.keras import backend as K
+from tensorflow.python.client import timeline
+
 
 class Experiment:
 	"""
@@ -16,7 +20,7 @@ class Experiment:
 
 	def __init__(self, name='unnamed', db='cifar10', net_type='vgg19', batch_size=128, epochs=100,
 				 checkpoint_dir='checkpoint', loss='categorical_crossentropy', activation='relu',
-				 final_activation='softmax', f_a_params = {}, use_tau=True,
+				 final_activation='softmax', f_a_params={}, use_tau=True,
 				 prob_layer=None, spp_alpha=1.0, lr=0.1, momentum=0.9, dropout=0, task='both', workers=4,
 				 queue_size=1024, val_metrics=['loss', 'acc'], rescale_factor=0, augmentation={},
 				 val_type='holdout', holdout=0.2, n_folds=5):
@@ -376,7 +380,7 @@ class Experiment:
 		:return: True if new metric is better than best metric or False otherwise.
 		"""
 		if self._best_metric is None or (
-						maximize and metric > self._best_metric or not maximize and metric <= self._best_metric):
+				maximize and metric > self._best_metric or not maximize and metric <= self._best_metric):
 			self._best_metric = metric
 			return True
 		return False
@@ -388,7 +392,6 @@ class Experiment:
 		Run training process.
 		:return: None
 		"""
-
 		print('=== RUNNING {} ==='.format(self.name))
 
 		# Initial epoch. 0 by default
@@ -405,7 +408,6 @@ class Experiment:
 			print("Training already finished. Skipping...")
 			return
 
-
 		# Get class weights based on frequency
 		class_weight = self._ds.get_class_weights()
 
@@ -416,21 +418,21 @@ class Experiment:
 			return lr
 
 		lr_drop = 20
+
 		def lr_scheduler(epoch):
 			return self.lr * (0.5 ** (epoch // lr_drop))
-
 
 		# Save epoch callback for training process
 		def save_epoch(epoch, logs):
 			# Check whether new metric is better than best metric
 			if (self.new_metric(logs['val_loss'])):
+				t = time.time()
 				model.save(os.path.join(self.checkpoint_dir, self.best_model_file))
-				print("Best model saved.")
+				print(f"Best model saved ({time.time() - t}s).")
 
 			with open(os.path.join(self.checkpoint_dir, self.model_file_extra), 'w') as f:
 				f.write(str(epoch + 1))
 				f.write('\n' + str(self.best_metric))
-
 
 		save_epoch_callback = keras.callbacks.LambdaCallback(on_epoch_end=save_epoch)
 
@@ -453,9 +455,6 @@ class Experiment:
 			print("===== RESTORING SAVED BEST MODEL =====")
 			model.load_weights(os.path.join(self.checkpoint_dir, self.best_model_file))
 
-		# Create the cost matrix that will be used to compute qwk
-		cost_matrix = K.constant(make_cost_matrix(self._ds.num_classes), dtype=K.floatx())
-
 		# Cross-entropy loss by default
 		loss = 'categorical_crossentropy'
 
@@ -465,7 +464,7 @@ class Experiment:
 
 		# Compile the keras model
 		model.compile(
-			optimizer = keras.optimizers.SGD(lr=self.lr, decay=lr_decay, momentum=0.9, nesterov=True),
+			optimizer=keras.optimizers.SGD(lr=self.lr, decay=lr_decay, momentum=0.9, nesterov=True),
 			loss=loss, metrics=metrics
 		)
 
@@ -481,7 +480,7 @@ class Experiment:
 							callbacks=[keras.callbacks.LearningRateScheduler(lr_scheduler),
 									   save_epoch_callback,
 									   keras.callbacks.CSVLogger(os.path.join(self.checkpoint_dir, self.csv_file),
-																	append=True),
+																 append=True),
 									   keras.callbacks.EarlyStopping(min_delta=0.0005, patience=40, verbose=1)
 									   ],
 							workers=self.workers,
@@ -492,7 +491,6 @@ class Experiment:
 							validation_steps=self._ds.num_batches_val(self.batch_size),
 							verbose=2
 							)
-
 
 		self.finished = True
 
@@ -505,7 +503,9 @@ class Experiment:
 		if os.path.isfile(os.path.join(self.checkpoint_dir, self.model_file)):
 			os.remove(os.path.join(self.checkpoint_dir, self.model_file))
 
-
+		# Clear model and session to avoid problems when evaluating
+		del model
+		K.clear_session()
 
 	def evaluate(self):
 		"""
@@ -527,29 +527,31 @@ class Experiment:
 		all_metrics = {}
 
 		# Get the generators for train, validation and test
-		generators = [self._ds.generate_train(self.batch_size, {}), self._ds.generate_val(self.batch_size), self._ds.generate_test(self.batch_size)]
-		steps = [self._ds.num_batches_train(self.batch_size), self._ds.num_batches_val(self.batch_size), self._ds.num_batches_test(self.batch_size)]
+		generators = [self._ds.generate_train(self.batch_size, {}), self._ds.generate_val(self.batch_size),
+					  self._ds.generate_test(self.batch_size)]
+		steps = [self._ds.num_batches_train(self.batch_size), self._ds.num_batches_val(self.batch_size),
+				 self._ds.num_batches_test(self.batch_size)]
+
+		# Build model
+		net_object = Net(self._ds.img_size, self.activation, self.final_activation, self.f_a_params, self.use_tau,
+						 self.prob_layer, self._ds.num_channels, self._ds.num_classes, self.spp_alpha, self.dropout)
+
+		# model = self.get_model(net_object, self.net_type)
+		model = net_object.build(self.net_type)
+
+		# Load weights
+		model.load_weights(os.path.join(self.checkpoint_dir, self.best_model_file))
 
 		for generator, step, set in zip(generators, steps, ['Train', 'Validation', 'Test']):
 			print('\n=== {} dataset ===\n'.format(set))
-
-			# NNet object
-			net_object = Net(self._ds.img_size, self.activation, self.final_activation, self.f_a_params, self.use_tau,
-							 self.prob_layer, self._ds.num_channels, self._ds.num_classes, self.spp_alpha, self.dropout)
-
-			# model = self.get_model(net_object, self.net_type)
-			model = net_object.build(self.net_type)
-
-			# Load weights
-			model.load_weights(os.path.join(self.checkpoint_dir, self.best_model_file))
 
 			# Get predictions
 			predictions = model.predict_generator(generator, steps=step, verbose=1)
 
 			y_set = None
 			for x, y in generator:
-				y_set = np.array(y) if y_set is None else np.vstack((y_set, y))				
-				
+				y_set = np.array(y) if y_set is None else np.vstack((y_set, y))
+
 			metrics = self.compute_metrics(y_set, predictions, self._ds.num_classes)
 			self.print_metrics(metrics)
 
@@ -600,7 +602,6 @@ class Experiment:
 		print('MSE: {:.4f}'.format(metrics['MSE']))
 		print('MS: {:.4f}'.format(metrics['MS']))
 
-
 	def get_config(self):
 		"""
 		Get config dictionary from object config.
@@ -616,7 +617,7 @@ class Experiment:
 			'prob_layer': self.prob_layer,
 			'loss': self.loss,
 			'activation': self.activation,
-			'use_tau' : self.use_tau,
+			'use_tau': self.use_tau,
 			'final_activation': self.final_activation,
 			'f_a_params': self.f_a_params,
 			'spp_alpha': self.spp_alpha,
@@ -629,9 +630,9 @@ class Experiment:
 			'val_metrics': self.val_metrics,
 			'rescale_factor': self.rescale_factor,
 			'augmentation': self.augmentation,
-			'val_type' : self._val_type,
-			'holdout' : self._holdout,
-			'n_folds' : self._n_folds
+			'val_type': self._val_type,
+			'holdout': self._holdout,
+			'n_folds': self._n_folds
 		}
 
 	def set_config(self, config):
@@ -670,22 +671,21 @@ class Experiment:
 		else:
 			self.set_auto_name()
 
-		
 		# Load dataset
-		self._ds = Dataset(self._db)
+		self._ds = Dataset(self._db, self._workers)
 
 		self._setup_validation()
 
 	def _setup_validation(self):
 		if self._ds is None:
 			raise Exception('Cannot setup validation because dataset is not loaded')
-			
+
 		# Validation config
 		if self._val_type == 'kfold':
 			self._ds.n_folds = self._n_folds
 			self._ds.set_fold(self._current_fold)
 		elif self._val_type == 'holdout':
-			self._ds.n_folds = 1 # 1 fold means holdout
+			self._ds.n_folds = 1  # 1 fold means holdout
 			self._ds.holdout = self._holdout
 		else:
 			raise Exception('{} is not a valid validation type.'.format(self._val_type))

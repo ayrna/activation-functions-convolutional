@@ -1,7 +1,7 @@
 import tensorflow as tf
-import keras
+from tensorflow import keras
 import numpy as np
-from keras import backend as K
+from tensorflow.keras import backend as K
 from sklearn.metrics import confusion_matrix
 
 def quadratic_weighted_kappa(num_classes, cost_matrix):

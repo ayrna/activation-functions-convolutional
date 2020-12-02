@@ -1,8 +1,9 @@
 import numpy as np
 import os
 import math
+import pickle
 from sklearn.model_selection import train_test_split, StratifiedKFold
-import keras
+from tensorflow import keras
 import cv2
 import pandas as pd
 from skimage.io import imread
@@ -31,7 +32,7 @@ class Dataset:
 	"""
 	Class that represents a dataset that is loaded from a file.
 	"""
-	def __init__(self, name, seed=1):
+	def __init__(self, name, workers=7, seed=1):
 		# Name / path of the dataset
 		self._name = name
 		
@@ -90,6 +91,9 @@ class Dataset:
 		self._std_train = None
 		self._std_val = None
 		self._std_test = None
+
+		# Number of workers for multiprocessing pools
+		self._workers = workers
 
 		# Do not load dataset here. Better load it when we need it.
 		# self.load(name)
@@ -538,6 +542,102 @@ class Dataset:
 			# If everything is correct, mark dataset as loaded
 			self._loaded = True
 
+	def _load_imagenet32(self):
+		# Small dataset
+		self._big_dataset = False
+
+		# Set sample shape and number of classes
+		self._sample_shape = (32, 32, 3)
+		self._num_classes = 1000
+
+		x_train = None
+		y_train = None
+		x_test = None
+		y_test = None
+
+		data_folder = '../datasets/imagenet32/'
+
+		def unpickle(file):
+			with open(file, 'rb') as fo:
+				dict = pickle.load(fo)
+			return dict
+
+		# Read train data
+		for i in range(1,11):
+			path = os.path.join(data_folder, 'train_data_batch_' + str(i))
+
+			d = unpickle(path)
+			x = d['data']
+			y = d['labels']
+			mean_image = d['mean']
+
+			x = x / np.float32(255)
+			mean_image = mean_image / np.float32(255)
+
+			# Convert 1-10 range to 0-9
+			y = [i-1 for i in y]
+
+			x -= mean_image
+
+			img_size2 = self._sample_shape[0] * self._sample_shape[1]
+
+			x = np.dstack((x[:, :img_size2], x[:, img_size2:2*img_size2], x[:, 2*img_size2:]))
+			x = x.reshape((x.shape[0], self._sample_shape[0], self._sample_shape[1], self._sample_shape[2]))
+
+			x_train = np.concatenate((x_train, x)) if x_train is not None else x
+			y_train = np.concatenate((y_train, y)) if y_train is not None else y
+
+			# Read test data
+			path = os.path.join(data_folder, 'val_data')
+
+			d = unpickle(path)
+			x = d['data']
+			y = d['labels']
+
+			x = x / np.float32(255)
+
+			# Convert 1-10 range to 0-9
+			y_test = [i - 1 for i in y]
+
+			img_size2 = self._sample_shape[0] * self._sample_shape[1]
+
+			x = np.dstack((x[:, :img_size2], x[:, img_size2:2 * img_size2], x[:, 2 * img_size2:]))
+			x_test = x.reshape((x.shape[0], self._sample_shape[0], self._sample_shape[1], self._sample_shape[2]))
+
+		# Save x and y
+		self._x_trainval, self._y_trainval = x_train, y_train
+		self._x_test, self._y_test = x_test, y_test
+
+		# Mark dataset as loaded
+		self._loaded = True
+
+	def _load_tiny_imagenet(self):
+		# Big dataset
+		self._big_dataset = True
+
+		# Load dataframes
+		self._df_trainval = pd.read_csv(
+			os.path.join(DATASETS_DIR, 'tiny-imagenet-200/data/train.csv'))
+		self._df_test = pd.read_csv(
+			os.path.join(DATASETS_DIR, 'tiny-imagenet-200/data/val.csv'))
+
+		# Set x and y columns
+		self._x_col = 'path'
+		self._y_col = 'category'
+
+		# Set base path for images
+		self._base_path = os.path.join(DATASETS_DIR, 'tiny-imagenet-200/data')
+
+		# Set sample shape and number of classes
+		self._sample_shape = (64, 64, 3)
+		self._num_classes = 200
+
+		# Check that images exist
+		if self._check_dataframe_images(self._df_trainval, self._x_col, self._base_path) and \
+				self._check_dataframe_images(self._df_test, self._x_col, self._base_path):
+			# If everything is correct, mark dataset as loaded
+			self._loaded = True
+
 	# Fully load x and y from dataframe
 	def _load_from_dataframe(self, df, x_col, y_col, base_path):
 		x = []
@@ -572,27 +672,27 @@ class Dataset:
 		self.load(self._name)
 
 		if self._big_dataset:
-			return BigGenerator(self._df_train, self._base_path, self._num_classes, self._x_col, self._y_col, mean=self.mean_train, std=self.std_train, batch_size=batch_size, augmentation=augmentation)
+			return BigGenerator(self._df_train, self._base_path, self._num_classes, self._x_col, self._y_col, mean=self.mean_train, std=self.std_train, batch_size=batch_size, augmentation=augmentation, workers=self._workers)
 		else:
-			return SmallGenerator(self._x_train, self._y_train, self._num_classes, mean=self.mean_train, std=self.std_train, batch_size=batch_size, augmentation=augmentation)
+			return SmallGenerator(self._x_train, self._y_train, self._num_classes, mean=self.mean_train, std=self.std_train, batch_size=batch_size, augmentation=augmentation, workers=self._workers)
 
 	def generate_val(self, batch_size):
 		# Load dataset if not loaded
 		self.load(self._name)
 
 		if self._big_dataset:
-			return BigGenerator(self._df_val, self._base_path, self._num_classes, self._x_col, self._y_col, mean=self.mean_train, std=self.std_train, batch_size=batch_size)
+			return BigGenerator(self._df_val, self._base_path, self._num_classes, self._x_col, self._y_col, mean=self.mean_train, std=self.std_train, batch_size=batch_size, workers=self._workers)
 		else:
-			return SmallGenerator(self._x_val, self._y_val, self._num_classes, mean=self.mean_train, std=self.std_train, batch_size=batch_size)
+			return SmallGenerator(self._x_val, self._y_val, self._num_classes, mean=self.mean_train, std=self.std_train, batch_size=batch_size, workers=self._workers)
 
 	def generate_test(self, batch_size):
 		# Load dataset if not loaded
 		self.load(self._name)
 
 		if self._big_dataset:
-			return BigGenerator(self._df_test, self._base_path, self._num_classes, self._x_col, self._y_col, mean=self.mean_train, std=self.std_train, batch_size=batch_size)
+			return BigGenerator(self._df_test, self._base_path, self._num_classes, self._x_col, self._y_col, mean=self.mean_train, std=self.std_train, batch_size=batch_size, workers=self._workers)
 		else:
-			return SmallGenerator(self._x_test, self._y_test, self._num_classes, mean=self.mean_train, std=self.std_train, batch_size=batch_size)
+			return SmallGenerator(self._x_test, self._y_test, self._num_classes, mean=self.mean_train, std=self.std_train, batch_size=batch_size, workers=self._workers)
 
 
 	def _check_dataframe_images(self, df, x_col, base_path):
@@ -608,7 +708,7 @@ class Dataset:
 		paths = df[self._x_col].values
 		count = df.shape[0]
 
-		with Pool(7) as p:
+		with Pool(self._workers) as p:
 			func = partial(parallel_img_sum, self._base_path)
 			summ = p.map(func, paths)
 
@@ -621,7 +721,7 @@ class Dataset:
 		paths = df[self._x_col].values
 		n = df.shape[0]
 
-		with Pool(7) as p:
+		with Pool(self._workers) as p:
 			func = partial(parallel_variance_sum, self._base_path, mean, n)
 			sums = p.map(func, paths)
 

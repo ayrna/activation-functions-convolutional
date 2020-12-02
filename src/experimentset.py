@@ -1,7 +1,6 @@
-import os
 import json
 import tensorflow as tf
-from keras import backend as K
+from tensorflow.keras import backend as K
 from experiment import Experiment
 
 class ExperimentSet:
@@ -38,18 +37,23 @@ class ExperimentSet:
 				yield experiment
 
 
-	def run_all(self, gpu_number=0):
+	def run_all(self):
 		"""
 		Execute all the experiments
-		:param gpu_number: GPU that will be used.
 		:return: None
 		"""
 		for experiment in self._generate_experiments():
-			os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_number)
-			with tf.device('/device:GPU:' + str(gpu_number)):
-				if not experiment.finished and experiment.task != 'test': # 'train' or 'both'
-					experiment.run()
-				if experiment.task != 'train': # 'test' or 'both'
-					experiment.evaluate()
+			# Dynamically allocate GPU memory
+			config = tf.ConfigProto()
+			config.gpu_options.allow_growth = True
+			sess = tf.Session(config=config)
+			K.set_session(sess)
+
+			# with tf.device('/device:GPU:' + str(gpu_number)):
+			if not experiment.finished and experiment.task != 'test': # 'train' or 'both'
+				experiment.run()
+			if experiment.task != 'train': # 'test' or 'both'
+				experiment.evaluate()
+
 			# Clear session
 			K.clear_session()

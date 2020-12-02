@@ -1,12 +1,14 @@
 import math
-import keras
+from tensorflow import keras
 import tensorflow as tf
 from tensorflow import distributions, matrix_band_part, igamma, lgamma
-from keras import backend as K
+from tensorflow.keras import backend as K
+
 
 def cons_greater_zero(value):
 	epsilon = 1e-9
 	return epsilon + K.pow(value, 2)
+
 
 class SPP(keras.layers.Layer):
 	"""
@@ -27,17 +29,19 @@ class SPP(keras.layers.Layer):
 	def compute_output_shape(self, input_shape):
 		return input_shape
 
+
 class SPPT(keras.layers.Layer):
 	"""
 	Trainable Parametric softplus activation layer.
 	"""
 
-	def __init__(self, **kwargs):
+	def __init__(self, channel_wise=False, **kwargs):
 		super(SPPT, self).__init__(**kwargs)
 		self.__name__ = 'SPP'
+		self.channel_wise = channel_wise
 
 	def build(self, input_shape):
-		self.alpha = self.add_weight(name='alpha', shape=(1,), dtype=K.floatx(),
+		self.alpha = self.add_weight(name='alpha', shape=(int(input_shape[-1]),) if self.channel_wise else (1,), dtype=K.floatx(),
 									 initializer=keras.initializers.RandomUniform(minval=0, maxval=1),
 									 trainable=True)
 
@@ -48,19 +52,6 @@ class SPPT(keras.layers.Layer):
 
 	def compute_output_shape(self, input_shape):
 		return input_shape
-
-
-def parametric_softplus(spp_alpha):
-	"""
-	Compute parametric softplus function with given alpha.
-	:param spp_alpha: alpha parameter for softplus function.
-	:return: parametric softplus activation value.
-	"""
-
-	def spp(x):
-		return K.log(1 + K.exp(x)) - spp_alpha
-
-	return spp
 
 
 class MPELU(keras.layers.Layer):
@@ -154,12 +145,13 @@ class PairedReLU(keras.layers.Layer):
 
 	def call(self, inputs, **kwargs):
 		return K.concatenate(
-			(keras.activations.relu(self.scale * inputs - self.theta), keras.activations.relu(-self.scale * inputs - self.theta_p)),
+			(keras.activations.relu(self.scale * inputs - self.theta),
+			 keras.activations.relu(-self.scale * inputs - self.theta_p)),
 			axis=len(inputs.get_shape()) - 1)
 
 	def compute_output_shape(self, input_shape):
 		shape = list(input_shape)
-		shape[-1]  = shape[-1] * 2
+		shape[-1] = shape[-1] * 2
 		shape = tuple(shape)
 		return shape
 
@@ -170,17 +162,12 @@ class EReLU(keras.layers.Layer):
 		self.alpha = alpha
 
 	def build(self, input_shape):
-		# shape = input_shape[1:]
-
-		# self.k = self.add_weight(name='k', shape=shape, dtype=K.floatx(),
-		# 						 initializer=keras.initializers.RandomUniform(minval=1 - self.alpha, maxval=1 + self.alpha), trainable=False)
-
-		# Finish building
 		super(EReLU, self).build(input_shape)
 
 	def call(self, inputs, **kwargs):
 		# Generate random uniform tensor between [1-alpha, 1+alpha] for training and ones tensor for test (ReLU)
-		k = K.in_train_phase(K.random_uniform(inputs.shape[1:], 1 - self.alpha, 1 + self.alpha), K.ones(inputs.shape[1:]))
+		k = K.in_train_phase(K.random_uniform(inputs.shape[1:], 1 - self.alpha, 1 + self.alpha),
+							 K.ones(inputs.shape[1:]))
 
 		return keras.activations.relu(inputs * k)
 
@@ -195,7 +182,8 @@ class EPReLU(keras.layers.Layer):
 
 	def build(self, input_shape):
 		# Trainable (PReLU) parameter
-		self.a = self.add_weight(name='a', shape=input_shape[1:], dtype=K.floatx(), initializer=keras.initializers.RandomUniform(0.0, 1.0))
+		self.a = self.add_weight(name='a', shape=input_shape[1:], dtype=tf.float32,
+								 initializer=keras.initializers.RandomUniform(0.0, 1.0))
 
 		# Finish building
 		super(EPReLU, self).build(input_shape)
@@ -207,8 +195,9 @@ class EPReLU(keras.layers.Layer):
 
 		pos = keras.activations.relu(inputs) * k
 		neg = -self.a * keras.activations.relu(-inputs)
+		out = pos + neg
 
-		return pos + neg
+		return out
 
 
 class SQRTActivation(keras.layers.Layer):
@@ -231,14 +220,12 @@ class RReLu(keras.layers.Layer):
 		super(RReLu, self).__init__(**kwargs)
 
 	def build(self, input_shape):
-		# self.alpha = self.add_weight(name='alpha', shape=input_shape[1:], dtype=K.floatx(),
-		#							 initializer=keras.initializers.RandomUniform(minval=0.0, maxval=1.0))
-
 		super(RReLu, self).build(input_shape)
 
 	def call(self, inputs, **kwargs):
 		# Generate random uniform alpha
-		alpha = K.in_train_phase(K.random_uniform(inputs.shape[1:], 0.0, 1.0), K.constant((0.0+1.0)/2.0, shape=inputs.shape[1:]))
+		alpha = K.in_train_phase(K.random_uniform(inputs.shape[1:], 0.0, 1.0),
+								 K.constant((0.0 + 1.0) / 2.0, shape=inputs.shape[1:]))
 
 		pos = keras.activations.relu(inputs)
 		neg = alpha * keras.activations.relu(-inputs)
@@ -253,17 +240,14 @@ class PELU(keras.layers.Layer):
 	def build(self, input_shape):
 		self.alpha = self.add_weight(name='alpha', shape=(1,), dtype=K.floatx(),
 									 initializer=keras.initializers.RandomUniform(minval=0.0, maxval=1))
-		# self.alpha = K.clip(self.alpha, 0.0001, 10)
-
 		self.beta = self.add_weight(name='beta', shape=(1,), dtype=K.floatx(),
 									initializer=keras.initializers.RandomUniform(minval=0.0, maxval=1))
-		# self.beta = K.clip(self.beta, 0.0001, 10)
-
 		super(PELU, self).build(input_shape)
 
 	def call(self, inputs, **kwargs):
 		pos = (cons_greater_zero(self.alpha) / cons_greater_zero(self.beta)) * keras.activations.relu(inputs)
-		neg = cons_greater_zero(self.alpha) * (K.exp((-keras.activations.relu(-inputs)) / cons_greater_zero(self.beta)) - 1)
+		neg = cons_greater_zero(self.alpha) * (
+				K.exp((-keras.activations.relu(-inputs)) / cons_greater_zero(self.beta)) - 1)
 
 		return pos + neg
 
@@ -304,13 +288,14 @@ class PTELU(keras.layers.Layer):
 
 		return pos + neg
 
+
 class ELUPlus(keras.layers.Layer):
 	def __init__(self, **kwargs):
 		super(ELUPlus, self).__init__(**kwargs)
 
 	def build(self, input_shape):
 		self.lmbd = self.add_weight(name='lambda', shape=(int(input_shape[-1]),), dtype=K.floatx(),
-									 initializer=keras.initializers.Constant(value=0.5))
+									initializer=keras.initializers.Constant(value=0.5))
 
 		self.lmbd = K.clip(self.lmbd, 0.0, 1.0)
 
@@ -321,16 +306,17 @@ class ELUPlus(keras.layers.Layer):
 
 
 class ELUSPPT(keras.layers.Layer):
-	def __init__(self, **kwargs):
+	def __init__(self, channel_wise=False, **kwargs):
 		super(ELUSPPT, self).__init__(**kwargs)
+		self.channel_wise = channel_wise
 
 	def build(self, input_shape):
 		self.lmbd = self.add_weight(name='lambda', shape=(int(input_shape[-1]),), dtype=K.floatx(),
-									 initializer=keras.initializers.Constant(value=0.5))
+									initializer=keras.initializers.Constant(value=0.5))
 
 		self.lmbd = K.clip(self.lmbd, 0.0, 1.0)
 
-		self.alpha = self.add_weight(name='alpha', shape=(1,), dtype=K.floatx(),
+		self.alpha = self.add_weight(name='alpha', shape=(int(input_shape[-1]),) if self.channel_wise else (1,), dtype=K.floatx(),
 									 initializer=keras.initializers.RandomUniform(minval=0, maxval=1),
 									 trainable=True)
 
@@ -347,7 +333,7 @@ class ELUSPPT(keras.layers.Layer):
 # CINIC-10 c = 1, k = 2
 # Fashion-MNIST c = 100, k = 1.2
 class Softplusplus(keras.layers.Layer):
-	def __init__(self, c = 1.0, k = 2.0, **kwargs):
+	def __init__(self, c=1.0, k=2.0, **kwargs):
 		super(Softplusplus, self).__init__(**kwargs)
 		self.c = c
 		self.k = k
@@ -357,4 +343,3 @@ class Softplusplus(keras.layers.Layer):
 
 	def call(self, inputs, **kwargs):
 		return tf.math.softplus(self.k * inputs) + (inputs / self.c) - tf.math.log(2.0)
-		# return tf.math.log(1.0 + tf.math.exp(self.k * inputs)) + (inputs / self.c) - tf.math.log(2.0)

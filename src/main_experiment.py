@@ -1,8 +1,7 @@
+import os
 import click
-from experiment import Experiment
 from experimentset import ExperimentSet
-import tensorflow as tf
-from keras import backend as K
+
 
 @click.group()
 def cli():
@@ -11,10 +10,14 @@ def cli():
 
 @cli.command('experiment', help='Experiment mode')
 @click.option('--file', '-f', required=True, help=u'File that contains the experiments that will be executed.')
-@click.option('--gpu', '-g', required=False, default=0, help=u'GPU index')
+@click.option('--gpu', '-g', required=False, default="0", help=u'GPU index')
 def experiment(file, gpu):
+	# Set visible GPU
+	os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+	os.environ["CUDA_VISIBLE_DEVICES"] = gpu
+
 	experimentSet = ExperimentSet(file)
-	experimentSet.run_all(gpu_number=gpu)
+	experimentSet.run_all()
 
 
 if __name__ == '__main__':

@@ -6,14 +6,14 @@ import pickle
 import os
 import prettytable
 import h5py
-import keras
+from tensorflow import keras
 import cv2
 import csv
 from PIL import Image
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from shutil import copy
-from keras import backend as K
+from tensorflow.keras import backend as K
 
 evaluation_file = 'evaluation.pickle'
 
