@@ -66,15 +66,29 @@ Contributions are welcome. Pull requests are encouraged to be formatted accordin
 
 ## Usage
 
-You can run all the experiments with CIFAR-10, CIFAR-100, CINIC-10, MNIST and Fashion-MNIST by running the following lines:
+You can run all the experiments with the VGG-16 architecture and CIFAR-10, CIFAR-100, CINIC-10, MNIST and Fashion-MNIST datasets by running the following lines:
 
   ```sh
-  python main_experiment.py experiment -f exp/activations_cifar10.json
-  python main_experiment.py experiment -f exp/activations_cifar100.json
-  python main_experiment.py experiment -f exp/activations_cinic10.json
-  python main_experiment.py experiment -f exp/activations_mnist.json
-  python main_experiment.py experiment -f exp/activations_fashion.json
+  python main_experiment.py experiment -f exp/vgg16_cifar10.json
+  python main_experiment.py experiment -f exp/vgg16_cifar100.json
+  python main_experiment.py experiment -f exp/vgg16_cinic10.json
+  python main_experiment.py experiment -f exp/vgg16_mnist.json
+  python main_experiment.py experiment -f exp/vgg16_fashion.json
+  python main_experiment.py experiment -f exp/vgg16_tiny_1.json
+  python main_experiment.py experiment -f exp/vgg16_tiny_2.json
+  python main_experiment.py experiment -f exp/vgg16_tiny_3.json
   ```
+
+Also, you can run the experiments with the DenseNet121 model with:
+
+  ```sh
+  python main_experiment.py experiment -f exp/densenet_cifar10.json
+  python main_experiment.py experiment -f exp/densenet_cifar100.json
+  python main_experiment.py experiment -f exp/densenet_cinic10.json
+  python main_experiment.py experiment -f exp/densenet_mnist.json
+  python main_experiment.py experiment -f exp/densenet_fashion.json
+  ```
+
 
 Note that the CINIC dataset must be stored under `../datasets/CINIC`.
 
@@ -96,4 +110,5 @@ The paper titled "Activation functions for convolutional neural networks: propos
 
 * Víctor Manuel Vargas ([@victormvy](https://github.com/victormvy))
 * Pedro Antonio Gutiérrez ([@pagutierrez](https://github.com/pagutierrez))
+* Javier Barbero Gómez ([@javierbg](https://github.com/javierbg))
 * César Hervás-Martínez (chervas@uco.es)
